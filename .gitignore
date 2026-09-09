@@ -1,0 +1,18 @@
+# 密钥与本地环境配置（.env.example 为模板，可提交）
+.env
+
+# 运行时数据：会话数据库与嵌入向量缓存（首次运行自动生成）
+data/*.db
+data/*.npz
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 系统/编辑器
+.DS_Store
+.idea/
+.vscode/

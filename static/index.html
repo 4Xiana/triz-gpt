@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TRIZ-GPT · 人机交互创意生成系统</title>
+<link rel="stylesheet" href="/static/styles.css?v=202609103">
+</head>
+<body>
+<div id="app">
+
+  <section v-if="view==='home'" class="home">
+    <div class="paper-sheet home-card">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">💡</span>
+        <div>
+          <h1>TRIZ-GPT</h1>
+          <p class="subtitle">基于 TRIZ 理论的多智能体人机交互创意生成系统</p>
+        </div>
+      </div>
+
+      <div class="flow-strip">
+        <span class="flow-node">① 识别矛盾</span><span class="flow-arrow">→</span>
+        <span class="flow-node">② 方案生成</span><span class="flow-arrow">→</span>
+        <span class="flow-node">③ 方案评估</span><span class="flow-arrow">→</span>
+        <span class="flow-node">④ 优化迭代</span>
+      </div>
+
+      <label class="field-label">描述你面临的工程 / 设计问题（包含相互制约的矛盾）</label>
+      <div class="composer">
+        <textarea v-model="problem" rows="6"
+          placeholder="例如：飞机起落架需要足够坚固以承受冲击载荷，但越坚固的结构往往越重，导致飞机重量和能耗增加……"></textarea>
+        <div class="composer-bar">
+          <div class="switch-wrap">
+            <div v-if="autoMode" class="auto-params-pop paper-sheet">
+              <div class="pop-row">
+                <span>发散方案数 <b>{{ candidatesK }}</b></span>
+                <input type="range" min="3" max="9" v-model.number="candidatesK">
+              </div>
+              <div class="pop-row">
+                <span>优化迭代轮数 <b>{{ optIterN }}</b></span>
+                <input type="range" min="1" max="6" v-model.number="optIterN">
+              </div>
+            </div>
+            <button type="button" class="switch" :class="{on: autoMode}" role="switch"
+                    :aria-checked="autoMode" @click="autoMode=!autoMode"
+                    :aria-label="'全自动模式开关'">
+              <span class="switch-knob"></span>
+            </button>
+            <span class="switch-label">全自动模式</span>
+            <span class="switch-hint">{{ autoMode ? '连续执行全流程' : '三处节点暂停：选矛盾 · 定方案 · 控优化' }}</span>
+          </div>
+          <button class="btn-primary composer-send" @click="startRun" :disabled="!problem.trim()">
+            <span aria-hidden="true">✦</span> 开始生成
+          </button>
+        </div>
+      </div>
+
+      <div class="examples">
+        <span class="ex-label">试试经典案例：</span>
+        <button v-for="(ex, i) in examples" :key="i" class="chip" @click="problem=ex.text">
+          {{ ex.name }}
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section v-else class="workspace">
+    <aside class="chat-panel">
+      <header class="panel-head">
+        <div class="ws-brand" @click="view='home'">
+          <span class="brand-mark small" aria-hidden="true">💡</span>
+          <b>TRIZ-GPT</b>
+        </div>
+        <button class="btn-ghost" @click="restart">＋ 新建</button>
+      </header>
+
+      <!-- 左上角分支树：展示探索家族关系与任务进度，点击节点定位到对应断点，可折叠 -->
+      <div v-if="currentRunId" class="branch-tree" :class="{ collapsed: treeCollapsed }">
+        <button type="button" class="bt-head" @click="treeCollapsed = !treeCollapsed"
+                :title="treeCollapsed ? '展开分支树' : '折叠分支树'">
+          <span class="bt-caret" aria-hidden="true">{{ treeCollapsed ? '▸' : '▾' }}</span>
+          <span class="bt-title">🌿 探索导航</span>
+          <span class="bt-count">{{ branches.length }}</span>
+          <span v-if="treeCollapsed && currentBranch" class="bt-cur">
+            <span class="branch-dot" :class="'st-' + currentBranch.status"></span>
+            {{ branchLabel(currentBranch) }}
+          </span>
+        </button>
+        <!-- 多分支进度轨道：8 个共享节点列（节点名在节点上方，可点击锚定对话流），每条分支一条贯穿进度线，分叉处在轨道上直接分叉 -->
+        <div v-show="!treeCollapsed" class="bp-track">
+          <!-- 第一行 = 初始路径：左侧名称、右侧 8 个带名节点（列头与根路径合一，不再另起行） -->
+          <div v-if="rootBranch" class="bp-row"
+               :class="{ active: rootBranch.run_id === currentRunId }"
+               @click="locateBranch(rootBranch)"
+               @mouseenter="onBpEnter($event, rootBranch)" @mouseleave="onBpLeave()"
+               :title="'点击定位到该路径：' + branchLabel(rootBranch)">
+            <span class="bp-row-name">{{ branchLabel(rootBranch) }}</span>
+            <div class="bp-row-track bp-head-track">
+              <button v-for="(s, si) in progressSteps" :key="s.key" type="button"
+                      class="bp-col"
+                      :title="s.title + '（点击定位到对话位置）'"
+                      @click.stop="locateNode(rootBranch, si)">
+                <span class="bp-col-name">{{ s.short }}</span>
+                <span class="bp-mark" :class="'kind-' + s.kind + ' ' + markClass(rootBranch, si)">
+                  <span class="bpm-glyph">{{ nodeGlyph(rootBranch, si) }}</span>
+                </span>
+              </button>
+            </div>
+          </div>
+          <!-- 子分支行：左侧编号名称、右侧贯穿进度线（分叉竖线连接父行节点） -->
+          <div v-for="b in childBranches" :key="b.run_id" class="bp-row"
+               :class="{ active: b.run_id === currentRunId }"
+               @click="locateBranch(b)"
+               @mouseenter="onBpEnter($event, b)" @mouseleave="onBpLeave()"
+               :title="'点击切换到该分支：' + branchLabel(b)">
+            <span class="bp-row-name">{{ branchLabel(b) }}</span>
+            <div class="bp-row-track">
+              <span v-if="b.forkCol != null" class="bp-fork" :style="forkStyle(b)"></span>
+              <span v-for="i in 7" :key="'seg' + i"
+                    class="bp-seg" :class="segClass(b, i - 1)" :style="segStyle(i - 1)"></span>
+              <template v-for="(s, si) in progressSteps" :key="'nd' + s.key">
+                <span v-if="b.forkCol == null || si >= b.forkCol"
+                      class="bp-mark node" :class="'kind-' + s.kind + ' ' + markClass(b, si)"
+                      :style="markStyle(si)"
+                      :title="s.title + '（点击定位到对话位置）'"
+                      @click.stop="locateNode(b, si)">
+                  <span class="bpm-glyph">{{ nodeGlyph(b, si) }}</span>
+                </span>
+              </template>
+              <span v-if="branchIter(b) && branchStep(b) >= 6" class="bp-iter">×{{ branchIter(b) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <main class="dialogue">
+        <div class="msg-row user-row">
+          <div class="user-bubble paper-sheet">{{ problem }}</div>
+        </div>
+
+        <div v-for="(m, i) in messages" :key="i" class="msg-row"
+             :class="{ 'me-row': m.type==='pause' }"
+             :data-locate="m.locateMark ? '1' : null">
+          <template v-if="m.type==='phase'">
+            <div class="phase-sep">
+              <div class="phase-title">
+                <span class="phase-badge">阶段 {{ m.index+1 }}</span>
+                <b>{{ m.name }}</b>
+              </div>
+              <small class="phase-desc">{{ m.desc }}</small>
+              <div class="phase-team">
+                <span v-for="key in phases[m.index].team" :key="key" class="team-chip">
+                  <span class="team-ico" aria-hidden="true">{{ rosterItem(key).icon }}</span>{{ rosterItem(key).title }}
+                </span>
+              </div>
+            </div>
+          </template>
+          <template v-else-if="m.type==='system'">
+            <div class="sys-msg"><span aria-hidden="true">⚙︎</span> {{ m.content }}</div>
+          </template>
+          <template v-else-if="m.type==='pause'">
+            <div class="me-stack">
+              <div class="me-name">我</div>
+            <div class="pause-panel paper-sheet" :class="{ done: m.done }">
+              <template v-if="!m.done">
+                <!-- 节点一：矛盾对选择 -->
+                <template v-if="m.stage==='pair'">
+                  <h3>我来选定主要矛盾对</h3>
+                  <p class="muted">TRIZ 参数匹配专家给出了以下技术矛盾，我来选一组作为后续研究对象；也可以编辑参数映射或自定义矛盾对：</p>
+                  <template v-for="(p, j) in m.pairs" :key="j">
+                    <label class="pair-option" :class="{chosen: m.chosen===j && m.editing!==j}">
+                      <input type="radio" :value="j" v-model="m.chosen" :disabled="m.editing===j">
+                      <span>
+                        <b>矛盾 {{ j+1 }}：</b>
+                        改善<span class="kn-hot" data-k="parameter" :data-id="p.improving_param_id">「{{ p.improving_param_name }}」<small class="muted">(K{{ p.improving_param_id }})</small></span>
+                        ⇄ 恶化<span class="kn-hot" data-k="parameter" :data-id="p.worsening_param_id">「{{ p.worsening_param_name }}」<small class="muted">(K{{ p.worsening_param_id }})</small></span>
+                        <em class="pair-why">{{ p.rationale }}</em>
+                        <button type="button" class="btn-mini btn-ghost"
+                                @click.prevent="startPairEdit(m, j)">✏️ 编辑</button>
+                      </span>
+                    </label>
+                    <div v-if="m.editing===j" class="pair-editor">
+                      <div class="pe-row">
+                        <label>改善参数</label>
+                        <select v-model.number="m.editForm.imp">
+                          <option v-for="op in paramOptions" :key="'i'+op.id" :value="op.id">K{{ op.id }} · {{ op.name }}</option>
+                        </select>
+                        <button type="button" class="btn-mini swap-btn" @click="swapPairForm(m)" title="交换改善/恶化方向">⇄</button>
+                        <label>恶化参数</label>
+                        <select v-model.number="m.editForm.wor">
+                          <option v-for="op in paramOptions" :key="'w'+op.id" :value="op.id">K{{ op.id }} · {{ op.name }}</option>
+                        </select>
+                      </div>
+                      <textarea v-model="m.editForm.impText" class="hint-input" rows="1"
+                                placeholder="改善侧的具体描述（可选，留空自动生成）"></textarea>
+                      <textarea v-model="m.editForm.worText" class="hint-input" rows="1"
+                                placeholder="恶化侧的具体描述（可选，留空自动生成）"></textarea>
+                      <div class="pe-actions">
+                        <button type="button" class="btn-primary btn-mini" @click="sendPairEdited(m)">确认编辑并选择</button>
+                        <button type="button" class="btn-ghost btn-mini" @click="cancelPairEdit(m)">取消</button>
+                      </div>
+                    </div>
+                  </template>
+
+                  <div v-if="m.editing==='custom'" class="pair-editor custom-editor">
+                    <b>＋ 自定义矛盾对</b>
+                    <div class="pe-row">
+                      <label>改善参数</label>
+                      <select v-model.number="m.editForm.imp">
+                        <option v-for="op in paramOptions" :key="'ci'+op.id" :value="op.id">K{{ op.id }} · {{ op.name }}</option>
+                      </select>
+                      <button type="button" class="btn-mini swap-btn" @click="swapPairForm(m)" title="交换改善/恶化方向">⇄</button>
+                      <label>恶化参数</label>
+                      <select v-model.number="m.editForm.wor">
+                        <option v-for="op in paramOptions" :key="'cw'+op.id" :value="op.id">K{{ op.id }} · {{ op.name }}</option>
+                      </select>
+                    </div>
+                    <textarea v-model="m.editForm.impText" class="hint-input" rows="1"
+                              placeholder="改善侧的具体描述（可选）"></textarea>
+                    <textarea v-model="m.editForm.worText" class="hint-input" rows="1"
+                              placeholder="恶化侧的具体描述（可选）"></textarea>
+                    <div class="pe-actions">
+                      <button type="button" class="btn-primary btn-mini" @click="sendPairEdited(m)">提交自定义矛盾</button>
+                      <button type="button" class="btn-ghost btn-mini" @click="cancelPairEdit(m)">取消</button>
+                    </div>
+                  </div>
+
+                  <div class="pause-actions">
+                    <button class="btn-primary" @click="sendPairChoice(m.chosen)" :disabled="m.editing!==null">确认选择</button>
+                    <button class="btn-ghost" @click="startPairCustom(m)" :disabled="m.editing!==null">＋ 自定义矛盾对</button>
+                    <button class="btn-ghost" @click="sendPairChoice('auto')">交给系统自动决策</button>
+                    <button class="btn-fork" @click="forkRun('pair')" title="保留当前路径，带着另一种选择开一条新分支">⎇ 分叉探索</button>
+                  </div>
+                </template>
+
+                <!-- 节点二：候选方案定夺 -->
+                <template v-else-if="m.stage==='candidate'">
+                  <h3>我来定夺候选方案</h3>
+                  <p class="muted">评审组已完成理想性评分。我可以直接采纳某条方案收尾，选定一条作为优化基线，或手动修改方案后再优化：</p>
+                  <template v-for="c in m.candidates" :key="'cand'+c.index">
+                    <label class="pair-option cand-option"
+                           :class="{chosen: m.chosen===c.index && m.editing!==c.index}">
+                      <input type="radio" :value="c.index" v-model="m.chosen" :disabled="m.editing===c.index">
+                      <span>
+                        <b>方案 {{ c.index+1 }}：{{ c.title }}</b>
+                        <span class="cand-opt-meta">
+                          <span class="kn-hot" data-k="principle" :data-id="c.principle_id">原则 {{ c.principle_id }}</span> · 理想性 <em class="opt-ideality-num">{{ c.ideality }}</em>
+                          （收益 {{ c.benefit }} / 成本 {{ c.cost }} / 副作用 {{ c.harm }}）
+                        </span>
+                        <button type="button" class="btn-mini btn-ghost"
+                                @click.prevent="startCandEdit(m, c.index)">✏️ 编辑后优化</button>
+                      </span>
+                    </label>
+                    <div v-if="m.editing===c.index" class="pair-editor">
+                      <b>手动修改方案 {{ c.index+1 }}（修改版将重新评分并作为优化基线）</b>
+                      <input v-model="m.editForm.title" class="hint-input"
+                             placeholder="方案标题">
+                      <textarea v-model="m.editForm.text" class="hint-input" rows="6"
+                                placeholder="方案正文：可直接在此修改、增补或裁剪"></textarea>
+                      <div class="pe-actions">
+                        <button type="button" class="btn-primary btn-mini" @click="sendCandEdited(m)">以此修改版进入优化</button>
+                        <button type="button" class="btn-ghost btn-mini" @click="cancelCandEdit(m)">取消</button>
+                      </div>
+                    </div>
+                  </template>
+                  <div class="pause-actions">
+                    <button class="btn-primary" @click="sendCandidateChoice('choose')" :disabled="m.editing!==null">以此方案进入优化</button>
+                    <button class="btn-ghost" @click="sendCandidateChoice('accept')" :disabled="m.editing!==null">直接采纳为最终方案</button>
+                    <button class="btn-ghost" @click="sendCandidateChoice('auto')">交给系统自动</button>
+                    <button class="btn-fork" @click="forkRun('candidate')" title="保留当前路径，带着另一种方案选择开一条新分支">⎇ 分叉探索</button>
+                  </div>
+                </template>
+
+                <!-- 节点三：每轮优化后决策 -->
+                <template v-else-if="m.stage==='iterate'">
+                  <h3>第 {{ m.iter }} 轮优化完成，我来决定下一步</h3>
+                  <p class="iter-summary">
+                    本轮理想性 <b>{{ m.ideality }}</b>
+                    <span :class="m.improved ? 'iter-up' : 'iter-flat'">
+                      {{ m.improved ? '↑ 已超越当前最优' : '— 未超越当前最优' }}
+                    </span>
+                    <span class="muted">（当前最优 {{ m.bestIdeality }}，剩余 {{ m.remaining }} 轮）</span>
+                  </p>
+                  <div class="iter-override">
+                    <button type="button" class="btn-mini btn-ghost"
+                            :disabled="m.improved || m.editing"
+                            @click="sendIterOverride('adopt')">⬆ 强制采用本轮版本</button>
+                    <button type="button" class="btn-mini btn-ghost"
+                            :disabled="!m.improved || m.editing"
+                            @click="sendIterOverride('discard')">✋ 舍弃本轮、保留原版</button>
+                    <button type="button" class="btn-mini btn-ghost"
+                            :disabled="m.editing"
+                            @click="startIterEdit(m)">✏️ 手动修改本轮方案</button>
+                  </div>
+                  <div v-if="m.editing" class="pair-editor">
+                    <b>手动修改第 {{ m.iter }} 轮方案（修改版将重新评分并采用）</b>
+                    <input v-model="m.editForm.title" class="hint-input" placeholder="方案标题">
+                    <textarea v-model="m.editForm.text" class="hint-input" rows="6"
+                              placeholder="本轮优化方案正文：可直接修改"></textarea>
+                    <div class="pe-actions">
+                      <button type="button" class="btn-primary btn-mini" @click="sendIterEdited(m)">采用修改版</button>
+                      <button type="button" class="btn-ghost btn-mini" @click="cancelIterEdit(m)">取消</button>
+                    </div>
+                  </div>
+                  <textarea v-model="m.hint" class="hint-input" rows="2"
+                            placeholder="可选：补充你的优化方向（如「进一步降低成本」「优先保证安全性」），优化设计师将据此调整"></textarea>
+                  <div class="pause-actions">
+                    <button class="btn-primary" @click="sendIterChoice('feedback')" :disabled="m.editing">按补充方向继续优化</button>
+                    <button class="btn-ghost" @click="sendIterChoice('continue')" :disabled="m.editing">继续下一轮</button>
+                    <button class="btn-ghost" @click="sendIterChoice('stop')">采纳当前方案，结束</button>
+                    <button class="btn-ghost" @click="sendIterChoice('auto')" :disabled="m.editing">剩余轮次自动完成</button>
+                    <button class="btn-fork" @click="forkRun('iterate')" title="保留当前路径，带着不同的轮次决策开一条新分支">⎇ 分叉探索</button>
+                  </div>
+                </template>
+              </template>
+              <div v-else class="pause-done">
+                <span class="pause-done-mark" aria-hidden="true">✓</span>
+                <span>{{ m.decisionLabel }}</span>
+              </div>
+            </div>
+            </div>
+            <div class="avatar avatar-me" aria-hidden="true">我</div>
+          </template>
+          <template v-else>
+            <div class="avatar" aria-hidden="true">{{ avatarOf(m.agent) }}</div>
+            <div class="bubble paper-sheet" :class="'ag-'+m.agent">
+              <div class="bubble-title">{{ m.agent_title || m.agent }}</div>
+              <div v-if="m.thinking || m.thinkingChars" class="think-in-bubble">
+                <button class="think-bar" @click="toggleThink(m)" :disabled="!m.thinking">
+                  <span class="think-ico" aria-hidden="true">💭</span>
+                  <span v-if="m.thinking">已深度思考<small>（约{{ m.thinkingChars }}字，点击{{ m.thinkOpen ? '收起' : '展开' }}）</small></span>
+                  <span v-else>已深度思考<small>（回放不含思考详情）</small></span>
+                </button>
+                <div v-show="m.thinkOpen && m.thinking" class="think-scroll think-archive">
+                  <pre class="think-grey">{{ m.thinking }}</pre>
+                </div>
+              </div>
+              <div class="bubble-text" v-html="renderText(m.content)"></div>
+              <div v-if="m.refs && m.refs.length" class="refs">
+                <span v-for="(r, j) in m.refs" :key="j" class="ref-chip"
+                      :data-k="r.type" :data-id="r.ref_id">
+                  <span aria-hidden="true">📎</span>
+                  <template v-if="r.type==='parameter'">参数 K{{ r.ref_id }}<template v-if="r.name"> · {{ r.name }}</template></template>
+                  <template v-else>原则 {{ r.ref_id }}<template v-if="r.name"> · {{ r.name }}</template></template>
+                </span>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div v-if="streaming" class="msg-row">
+          <div class="avatar" aria-hidden="true">{{ avatarOf(streaming.agent) }}</div>
+          <div class="bubble paper-sheet">
+            <div class="bubble-title">{{ streaming.agent_title || streaming.agent }}</div>
+            <div v-if="streaming.thinkContent || streaming.thinkStreaming" class="think-in-bubble">
+              <button class="think-bar" :class="{ live: streaming.thinkStreaming }"
+                      @click="toggleThink(streaming)" :disabled="streaming.thinkStreaming">
+                <span class="think-ico" :class="{ spinning: streaming.thinkStreaming }" aria-hidden="true">💭</span>
+                <span v-if="streaming.thinkStreaming">思路推演中<span class="think-dots"><i></i><i></i><i></i></span></span>
+                <span v-else>已深度思考<small>（点击{{ streaming.thinkOpen ? '收起' : '展开' }}）</small></span>
+              </button>
+              <div v-show="streaming.thinkStreaming || streaming.thinkOpen"
+                   class="think-scroll" :class="{ 'think-live': streaming.thinkStreaming }">
+                <pre class="think-grey">{{ streaming.thinkContent }}</pre><span v-if="streaming.thinkStreaming" class="stream-caret think-caret"></span>
+              </div>
+            </div>
+            <div v-if="streaming.content" class="bubble-text">
+              <span v-html="renderText(streaming.content)"></span><span class="stream-caret"></span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="activeAgent" class="msg-row typing-row">
+          <div class="avatar" aria-hidden="true">{{ avatarOf(activeAgent.agent) }}</div>
+          <div class="bubble paper-sheet typing-bubble">
+            <div class="bubble-title">{{ activeAgent.title }}</div>
+            <div class="typing-text">{{ activeAction }}<span class="typing-dots"><i></i><i></i><i></i></span></div>
+          </div>
+        </div>
+        <div v-else-if="running && !paused" class="thinking">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          Agent 协作中…
+        </div>
+      </main>
+    </aside>
+
+    <aside class="doc-panel">
+      <header class="doc-head">
+        <h3>关键结果</h3>
+      </header>
+      <div class="doc-scroll">
+        <div v-if="problem" class="doc-problem">
+          <span aria-hidden="true">📝</span><p>{{ problem }}</p>
+        </div>
+
+        <div v-if="!hasAnyResult" class="doc-empty">
+          <span aria-hidden="true">📝</span>
+          <p>关键结果将随协作流程推进记录在这里：<br>矛盾与原则 → 候选方案 → 理想性评估 → 优化迭代 → 最终方案</p>
+        </div>
+
+        <section v-if="error" class="card card-error doc-section">
+          <span class="card-tag" style="background:var(--red);color:#fff;">运行异常</span>
+          <p class="card-text ki-spaced"><span aria-hidden="true">⚠</span> {{ error }}</p>
+        </section>
+
+        <section v-if="params || pairs.length || selectedPair || principles.length" class="card doc-section">
+          <span class="card-tag">矛盾与原则</span>
+          <div v-if="params" class="summary-block">
+            <b class="doc-sub">关键参数</b>
+            <div class="chip-wrap">
+              <span v-for="(x, i) in params.parameters" :key="'param'+i" class="chip tiny">{{ x }}</span>
+            </div>
+          </div>
+          <div v-if="selectedPair" class="pair-summary">
+            <span>改善 <b class="kn-hot" data-k="parameter" :data-id="selectedPair.improving_param_id">{{ selectedPair.improving_param_name }}<small class="muted"> K{{ selectedPair.improving_param_id }}</small></b></span>
+            <span class="pair-cross" aria-hidden="true">⇄</span>
+            <span>恶化 <b class="kn-hot" data-k="parameter" :data-id="selectedPair.worsening_param_id">{{ selectedPair.worsening_param_name }}<small class="muted"> K{{ selectedPair.worsening_param_id }}</small></b></span>
+          </div>
+          <div v-else-if="pairs.length" class="pair-summary pending">
+            <span aria-hidden="true">🖐</span>
+            <span>已识别 <b>{{ pairs.length }}</b> 组技术矛盾，等待选定主要矛盾对</span>
+          </div>
+          <div v-if="principles.length" class="summary-block">
+            <b class="doc-sub">发明原则 <small class="muted">{{ principleSource==='matrix' ? '· 矩阵查询' : '· 专家推断' }}</small></b>
+            <div class="chip-wrap">
+              <span v-for="p in principles" :key="'p'+p.id" class="chip tiny principle-chip kn-hot"
+                    data-k="principle" :data-id="p.id">
+                {{ p.id }} · {{ p.name }}
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="candCards.length" class="card doc-section">
+          <span class="card-tag">创意方案 · {{ candCards.length }} 条候选<small v-if="scores.length" class="tag-note">（含理想性评估）</small></span>
+          <div v-if="hullSeries.length>1" class="hull-box">
+            <div class="hull-head">
+              <b>设计空间探索（凸包体积）</b>
+              <span class="hull-ratio">扩大至 {{ hullRatio }}×</span>
+            </div>
+            <svg-line :points="hullSeries" :color="'#2563eb'"></svg-line>
+          </div>
+          <div class="h-track">
+            <article v-for="c in candCards" :key="'c'+c.index"
+                     class="h-card cand-card" :class="{best: c.isBest}">
+              <div class="h-card-head">
+                <span class="cand-idx">方案 {{ c.index+1 }}</span>
+                <span v-if="c.isBest" class="best-badge"><span aria-hidden="true">🏆</span> 最优</span>
+                <span class="expand-badge" :class="c.expanded?'yes':'no'">
+                  {{ c.expanded ? '◇ 空间扩展' : '· 近似' }}
+                </span>
+              </div>
+              <div class="h-card-title">{{ c.title }}</div>
+              <span class="chip tiny principle-tag kn-hot" data-k="principle" :data-id="c.principle_id">原则 {{ c.principle_id }} · {{ c.principle_name }}</span>
+              <p class="h-card-text">{{ c.text }}</p>
+              <div v-if="c.score" class="h-card-foot">
+                <div class="ideality-line">理想性 <b>{{ c.score.ideality }}</b></div>
+                <div class="bars mini">
+                  <span class="bar benefit" :style="{width: c.score.benefit*10+'%'}">收益 {{ c.score.benefit }}</span>
+                </div>
+                <div class="bars mini">
+                  <span class="bar cost" :style="{width: c.score.cost*10+'%'}">成本 {{ c.score.cost }}</span>
+                </div>
+                <div class="bars mini">
+                  <span class="bar harm" :style="{width: c.score.harm*10+'%'}">副作用 {{ c.score.harm }}</span>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section v-if="optTimeline.length" class="card doc-section">
+          <span class="card-tag">优化迭代 · {{ optTimeline.length }} 轮</span>
+          <div v-if="optSeries.length>1" class="hull-box">
+            <div class="hull-head">
+              <b>理想性迭代曲线</b>
+              <span class="hull-ratio gold">{{ optSeries[optSeries.length-1] }}</span>
+            </div>
+            <svg-line :points="optSeries" :color="'#d97706'"></svg-line>
+          </div>
+          <div class="h-track">
+            <article v-for="opt in optTimeline" :key="'opt'+opt.iteration"
+                     class="h-card opt-card" :class="opt.improved?'adopted':'skipped'">
+              <div class="h-card-head">
+                <span class="opt-iter">第 {{ opt.iteration }} 轮</span>
+                <span class="round-tag" :class="opt.improved?'green':'gray'">
+                  {{ opt.improved ? '↑ 已采纳' : '— 未超越' }}
+                </span>
+              </div>
+              <div class="opt-ideality">理想性 <b>{{ opt.ideality }}</b></div>
+              <p class="h-card-text">{{ opt.text }}</p>
+            </article>
+          </div>
+        </section>
+
+        <section v-if="final" class="card card-final doc-section doc-final">
+          <span class="card-tag gold"><span aria-hidden="true">★</span> 最终方案</span>
+          <h4>{{ final.title }}</h4>
+          <p class="final-summary">{{ final.text }}</p>
+          <div class="final-meta">
+            <span>理想性 <b>{{ final.ideality }}</b></span>
+            <span>优化迭代 {{ final.opt_iterations }} 轮</span>
+          </div>
+          <div class="final-fork">
+            <span class="muted">想基于不同选择继续探索？</span>
+            <button class="btn-fork" @click="forkRun('pair')">⎇ 换一组矛盾对重新探索</button>
+            <button class="btn-fork" @click="forkRun('candidate')">⎇ 换基线方案重新优化</button>
+          </div>
+        </section>
+      </div>
+    </aside>
+  </section>
+
+  <div id="kn-tip" v-show="tip.show" class="kn-tip" :style="{left: tip.x+'px', top: tip.y+'px'}">
+    <div class="kn-tip-title">{{ tip.title }}</div>
+    <div class="kn-tip-detail">{{ tip.detail }}</div>
+    <div v-if="tip.examples.length" class="kn-tip-ex">
+      <div class="kn-tip-ex-label">举例</div>
+      <div v-for="(ex, i) in tip.examples" :key="i" class="kn-tip-ex-item">· {{ ex }}</div>
+    </div>
+  </div>
+
+  <!-- 多分支进度轨道：分支行悬停气泡 -->
+  <div id="bp-tip" v-show="bpTip.show" class="bp-tip" :style="{left: bpTip.x+'px', top: bpTip.y+'px'}">
+    <div class="bp-tip-title">{{ bpTip.title }}</div>
+    <div v-for="(ln, i) in bpTip.lines" :key="i" class="bp-tip-line">{{ ln }}</div>
+  </div>
+</div>
+
+<script src="/static/vendor/vue.global.prod.js"></script>
+<script src="/static/app.js?v=202609103"></script>
+</body>
+</html>
