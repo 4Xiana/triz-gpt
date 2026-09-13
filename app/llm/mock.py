@@ -229,18 +229,26 @@ class MockLLM(BaseLLM):
             score = 6 + seed % 4
             if refined:
                 score = min(10, score + 1)
-            comment = "方案针对矛盾给出了明确的改进路径，预期收益" + ("显著" if score >= 8 else "较好")
+            level = "显著" if score >= 8 else "较好"
+            reason = f"方案针对矛盾给出了明确的改进路径，核心结构直接作用于目标功能，预期收益{level}。"
+            suggestion = "可进一步放大核心结构的作用范围，并在后续优化中优先保持这一收益点不被附加结构稀释。"
         elif dimension == "cost":
             score = 3 + seed % 4
             if refined:
                 score = max(1, score - 1)
-            comment = "实现所需的附加成本与改动量" + ("较高" if score >= 6 else "中等可控")
+            level = "较高" if score >= 6 else "中等可控"
+            reason = f"方案引入了附加结构与材料，实现所需的制造与维护成本{level}。"
+            suggestion = "可将附加结构与原有部件一体化成型或改用更常见的材料/工艺，以降低制造与装配成本。"
         else:
             score = 2 + seed % 4
             if refined:
                 score = max(1, score - 1)
-            comment = "可能引入的副作用与有害因素" + ("较多" if score >= 5 else "较少且可控")
-        return json.dumps({"score": int(score), "comment": comment}, ensure_ascii=False)
+            level = "较多" if score >= 5 else "较少且可控"
+            reason = f"新增结构在运行中可能带来振动、噪音等次生效应，有害副作用{level}。"
+            suggestion = "在连接环节增加缓冲/隔振结构或对称布置抵消附加载荷，以抑制主要副作用。"
+        return json.dumps(
+            {"score": int(score), "reason": reason, "suggestion": suggestion},
+            ensure_ascii=False)
 
     def _refine_solution(self, meta: Dict) -> str:
         solution = meta["solution"]

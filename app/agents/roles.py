@@ -14,6 +14,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from ..triz import knowledge as K
+from ..triz import cases as CS
 
 JSON_RULE = "请严格按要求输出 JSON，不要输出 JSON 以外的解释文字。"
 
@@ -41,18 +42,23 @@ ROLES = {
     ),
     "expert_benefit": (
         "你是TRIZ-GPT系统中的【收益评审专家】，负责依据TRIZ的「理想性」标准评估设计方案的收益。"
-        "你只考察方案能带来的有用功能与收益大小，以十分制（1-10整数）打分，分数越高收益越大，"
-        "并给出简短评语。"
+        "你只考察方案能带来的有用功能与收益大小，以十分制（1-10整数）打分，分数越高收益越大。"
+        "评分必须给出具体依据（指出方案中带来收益的具体结构/做法），并指出进一步放大收益、"
+        "或在后续修改中必须注意保持的收益点，禁止只给笼统结论。"
     ),
     "expert_cost": (
         "你是TRIZ-GPT系统中的【成本评审专家】，负责依据TRIZ的「理想性」标准评估设计方案的成本。"
         "你只考察方案实现所需付出的成本（结构复杂度、材料、制造、能耗等代价），"
-        "以十分制（1-10整数）打分，分数越高表示成本越高昂，并给出简短评语与降低成本的建议。"
+        "以十分制（1-10整数）打分，分数越高表示成本越高昂。"
+        "评分必须给出具体依据（指出方案中导致成本的具体环节），并给出一条可操作的降低成本建议，"
+        "明确到结构、材料、工艺或使用方式的调整，禁止只给笼统结论。"
     ),
     "expert_harm": (
         "你是TRIZ-GPT系统中的【副作用评审专家】，负责依据TRIZ的「理想性」标准评估设计方案的有害副作用。"
         "你只考察方案可能引入的有害效应（污染、振动、噪音、安全隐患、次生问题等），"
-        "以十分制（1-10整数）打分，分数越高表示副作用越严重，并给出简短评语与抑制建议。"
+        "以十分制（1-10整数）打分，分数越高表示副作用越严重。"
+        "评分必须给出具体依据（指出方案中可能引发副作用的具体环节与机理），"
+        "并给出一条可操作的抑制/防护建议，明确到结构或控制措施的调整，禁止只给笼统结论。"
     ),
     "refiner": (
         "你是TRIZ-GPT系统中的【优化设计师】，负责依据评审专家的评分与改进建议对方案进行微调优化。"
@@ -105,6 +111,47 @@ def build_match_params(problem: str, parameters: List[str]):
     return instruction, meta, observe
 
 
+def _principle_knowledge_block(principle: Dict[str, Any], index: int = 0) -> str:
+    """构造发明原则的三层启发知识块：释义/详解 → 可操作子方法 → 真实案例 few-shot。
+
+    index 为候选序号：同一原则被多轮发散复用时，用它轮换真实案例集合，
+    避免每个候选拿到完全相同的范例而同质化。
+    """
+    pid = principle["id"]
+    lines = [
+        f"原则{pid}：{principle['name']}",
+        f"一句话释义：{principle['desc']}",
+    ]
+    detail = CS.principle_detail(pid)
+    if detail and detail != principle["desc"]:
+        lines.append(f"详解：{detail}")
+    methods = CS.principle_methods(pid)
+    if methods:
+        lines.append("可操作子方法（括号内为应用示例）：")
+        for m in methods[:5]:
+            examples = "；".join(m.get("e", [])[:3])
+            lines.append(f"- {m['t']}" + (f"（{examples}）" if examples else ""))
+
+    real_cases = CS.cases_for_principle(pid, limit=2, offset=index)
+    if real_cases:
+        lines.append(
+            "该原则的真实工程案例（英文原文；请体会其中原则如何落到具体结构与工作方式，"
+            "只可跨领域类比其思路，禁止照抄案例的领域与具体结构）：")
+        for i, c in enumerate(real_cases, 1):
+            problem = c["problem"][:CS.PROBLEM_MAX]
+            solution = c["solution"][:CS.SOLUTION_MAX]
+            lines.append(
+                f"案例{i}（来源：{c['lib_label']}）\n"
+                f"· 问题情境：{problem}\n· 具体解法：{solution}")
+    else:
+        # 无真实案例的原则：用内置中文教科书案例兜底（40 原则全覆盖）
+        textbook = CS.textbook_examples(pid)
+        if textbook:
+            lines.append("该原则的常见应用示例（仅作联想引子，你的方案必须针对当前问题原创、"
+                         "不得直接套用这些示例）：" + "；".join(textbook))
+    return "\n".join(lines)
+
+
 def build_generate_solution(problem: str, principle: Dict[str, Any],
                             candidates: List[Dict[str, Any]], index: int):
     if candidates:
@@ -114,12 +161,14 @@ def build_generate_solution(problem: str, principle: Dict[str, Any],
         existing_block = f"【已有候选方案（新方案必须与它们均显著不同）】\n{existing}\n\n"
     else:
         existing_block = "【目前尚无候选方案】\n\n"
+    principle_block = _principle_knowledge_block(principle, index)
     instruction = (
         f"【问题描述】\n{problem}\n\n"
-        f"【本轮使用的TRIZ发明原则】\n原则{principle['id']}：{principle['name']}——{principle['desc']}\n\n"
+        f"【本轮使用的TRIZ发明原则及其启发材料】\n{principle_block}\n\n"
         f"{existing_block}"
-        "请运用该发明原则，通过类比思维生成一条全新的、具体可落地的设计方案。"
-        "方案要明确结构/材料/工作方式/控制策略上的具体做法，200字以内。\n"
+        "请先体会上述子方法与真实案例中该原则的运用机理，再通过跨领域类比，"
+        "针对当前问题生成一条全新的、具体可落地的设计方案，"
+        "要明确结构/材料/工作方式/控制策略上的具体做法，200字以内。\n"
         f"{JSON_RULE}\n输出格式：\n"
         '{"title": "方案标题", "text": "方案完整描述"}'
     )
@@ -132,16 +181,23 @@ def build_generate_solution(problem: str, principle: Dict[str, Any],
 
 def build_score(problem: str, solution_text: str, dimension: str, refined: bool = False):
     dim_meta = {
-        "benefit": ("收益", "分数越高表示收益越大"),
-        "cost": ("成本", "分数越高表示成本越高（越差）"),
-        "harm": ("副作用", "分数越高表示有害副作用越严重（越差）"),
+        "benefit": ("收益", "分数越高表示收益越大",
+                    "进一步放大收益、或在后续修改中必须注意保持该收益的具体做法"),
+        "cost": ("成本", "分数越高表示成本越高（越差）",
+                 "从结构、材料、工艺或使用方式中选择切入点，给出降低该成本的具体调整方向"),
+        "harm": ("副作用", "分数越高表示有害副作用越严重（越差）",
+                 "针对该副作用的产生环节，给出具体的抑制或防护措施"),
     }[dimension]
     instruction = (
         f"【问题描述】\n{problem}\n\n"
         f"【待评估方案】\n{solution_text}\n\n"
-        f"请仅从【{dim_meta[0]}】维度评估该方案（{dim_meta[1]}），"
-        f"给出十分制整数评分（1-10）与简短评语。\n{JSON_RULE}\n输出格式：\n"
-        '{"score": 数字, "comment": "评语"}'
+        f"请仅从【{dim_meta[0]}】维度评估该方案（{dim_meta[1]}）：\n"
+        "1) score：十分制整数评分（1-10）；\n"
+        "2) reason：评分依据，必须引用方案中的具体设计/环节说明给分理由，"
+        "不能只写笼统的好坏判断（60字以内）；\n"
+        f"3) suggestion：针对性建议——{dim_meta[2]}（60字以内，要具体可操作）。\n"
+        f"{JSON_RULE}\n输出格式：\n"
+        '{"score": 数字, "reason": "评分依据", "suggestion": "针对性建议"}'
     )
     meta = {"task": "score_solution", "problem": problem,
             "solution": solution_text, "dimension": dimension, "refined": refined}

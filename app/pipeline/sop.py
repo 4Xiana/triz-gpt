@@ -550,7 +550,16 @@ class TRIZPipeline:
     # 阶段三：方案评估（理想性评分收拢）
     # ------------------------------------------------------------------
     async def _score_one(self, problem: str, text: str, emit: Emit,
-                         refined: bool = False) -> Dict[str, Any]:
+                         refined: bool = False,
+                         announce: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """组织三位评审专家并行打分。
+
+        announce 给定时，在打分完成后以「专家评审组」聚合气泡广播一条消息，
+        气泡携带三位专家各自的评分依据与针对性建议（reviews），供前端展开查看：
+        - {"kind": "candidate", "index", "title"}：初评候选方案；
+        - {"kind": "pre_refine", "title"}：优化前评审（建议驱动本轮精化）；
+        - {"kind": "rescore_edit", "title"}：用户手改方案后的重新评分。
+        """
         dims = [
             ("expert_benefit", "benefit", "收益"),
             ("expert_cost", "cost", "成本"),
@@ -562,19 +571,63 @@ class TRIZPipeline:
         async def _one(role, dim, label):
             parsed = await self._call(
                 role, roles.build_score, self._silent_emit,
-                render=lambda p: f"{label}评分：{p.get('score', '?')}/10。{p.get('comment', '')}",
+                render=lambda p: f"{label}评分：{p.get('score', '?')}/10。"
+                                 f"{p.get('reason', p.get('comment', ''))}",
                 problem=problem, solution_text=text, dimension=dim, refined=refined)
             return dim, parsed
 
         results = await asyncio.gather(*[_one(r, d, l) for r, d, l in dims])
         scores = {d: p for d, p in results}
-        benefit = float(scores.get("benefit", {}).get("score", 7) or 7)
-        cost = float(scores.get("cost", {}).get("score", 5) or 5)
-        harm = float(scores.get("harm", {}).get("score", 4) or 4)
+
+        def _num(dim: str, default: float) -> float:
+            try:
+                return float(scores.get(dim, {}).get("score", default) or default)
+            except (TypeError, ValueError):
+                return default
+
+        benefit = _num("benefit", 7)
+        cost = _num("cost", 5)
+        harm = _num("harm", 4)
         ideality = benefit / max(cost + harm, 1.0)
+
+        # 结构化评审明细：reason 兜底旧字段 comment（兼容历史模型输出）
+        label_map = {"benefit": "收益评审专家", "cost": "成本评审专家",
+                     "harm": "副作用评审专家"}
+        score_map = {"benefit": benefit, "cost": cost, "harm": harm}
+        reviews: List[Dict[str, Any]] = []
+        comments: Dict[str, str] = {}
+        for dim in ("benefit", "cost", "harm"):
+            p = scores.get(dim, {}) or {}
+            reason = str(p.get("reason") or p.get("comment") or "").strip()
+            suggestion = str(p.get("suggestion") or "").strip()
+            reviews.append({"dim": dim, "label": label_map[dim],
+                            "score": score_map[dim],
+                            "reason": reason, "suggestion": suggestion})
+            # 交给优化设计师的改进建议：依据 + 可操作建议（键用中文维度名）
+            comments[("收益" if dim == "benefit"
+                      else "成本" if dim == "cost" else "副作用")] = (
+                reason + (f" 改进建议：{suggestion}" if suggestion else ""))
+
+        if announce is not None:
+            tail = f"（收益{benefit:.0f}/成本{cost:.0f}/副作用{harm:.0f}）"
+            kind = announce.get("kind", "candidate")
+            if kind == "candidate":
+                content = (f"方案{announce['index'] + 1}《{announce['title']}》"
+                           f"理想性得分 {ideality:.2f}{tail}。")
+            elif kind == "pre_refine":
+                content = (f"优化前评审：当前最优方案《{announce.get('title', '')}》"
+                           f"理想性 {ideality:.2f}{tail}，三位专家的具体意见与改进建议如下，"
+                           f"优化设计师将据此精化方案。")
+            else:  # rescore_edit
+                content = (f"修改版《{announce.get('title', '')}》重新评分："
+                           f"理想性 {ideality:.2f}{tail}。")
+            await emit({"type": "message", "agent": "panel",
+                        "agent_title": "专家评审组", "content": content,
+                        "reviews": reviews})
+
         return {
             "benefit": benefit, "cost": cost, "harm": harm, "ideality": ideality,
-            "comments": {d: scores.get(d, {}).get("comment", "") for d in ("benefit", "cost", "harm")},
+            "comments": comments, "reviews": reviews,
         }
 
     async def _silent_emit(self, _event: Dict[str, Any]) -> None:
@@ -584,7 +637,10 @@ class TRIZPipeline:
                                 emit: Emit):
         scored = []
         for cand in candidates:
-            result = await self._score_one(problem, cand["text"], emit)
+            result = await self._score_one(
+                problem, cand["text"], emit,
+                announce={"kind": "candidate", "index": cand["index"],
+                          "title": cand["title"]})
             item = dict(cand)
             item.update(result)
             scored.append(item)
@@ -592,13 +648,7 @@ class TRIZPipeline:
                 "index": item["index"], "title": item["title"],
                 "benefit": result["benefit"], "cost": result["cost"],
                 "harm": result["harm"], "ideality": round(result["ideality"], 3),
-                "comments": result["comments"]}})
-            await emit({"type": "message", "agent": "panel",
-                        "agent_title": "专家评审组",
-                        "content": (f"方案{item['index'] + 1}《{item['title']}》理想性得分 "
-                                    f"{result['ideality']:.2f}"
-                                    f"（收益{result['benefit']:.0f}/成本{result['cost']:.0f}/"
-                                    f"副作用{result['harm']:.0f}）。")})
+                "reviews": result["reviews"]}})
         best_idx = max(range(len(scored)), key=lambda i: scored[i]["ideality"])
         await emit({"type": "card", "card": "scores",
                     "items": [{
@@ -662,7 +712,10 @@ class TRIZPipeline:
             await emit({"type": "system",
                         "content": f"用户手动编辑了方案 {idx + 1}《{scored[idx].get('title', '')}》，"
                                    f"评审组正在对修改版重新评分…"})
-            new_eval = await self._score_one(problem, new_text, emit, refined=True)
+            new_eval = await self._score_one(
+                problem, new_text, emit, refined=True,
+                announce={"kind": "rescore_edit",
+                          "title": new_title or scored[idx].get("title", "")})
             item = dict(scored[idx])
             item["text"] = new_text
             if new_title:
@@ -674,7 +727,7 @@ class TRIZPipeline:
                         "benefit": new_eval["benefit"], "cost": new_eval["cost"],
                         "harm": new_eval["harm"],
                         "ideality": round(new_eval["ideality"], 3),
-                        "comments": new_eval["comments"]})
+                        "reviews": new_eval["reviews"]})
             await emit({"type": "system",
                         "content": f"修改版重新评分完成：理想性 {new_eval['ideality']:.2f}"
                                    f"（收益{new_eval['benefit']:.0f}/成本{new_eval['cost']:.0f}/"
@@ -749,9 +802,12 @@ class TRIZPipeline:
             if failures >= cfg.opt_fail_t:
                 break
             iterations += 1
-            # 评审专家对当前最优方案给出评分与改进建议
-            current_eval = await self._score_one(problem, best["text"], emit)
+            # 评审专家对当前最优方案给出评分依据与改进建议（气泡可展开查看明细）
+            current_eval = await self._score_one(
+                problem, best["text"], emit,
+                announce={"kind": "pre_refine", "title": best.get("title", "")})
             suggestions = current_eval["comments"]
+            round_reviews = current_eval["reviews"]
             refined = await self._call(
                 "refiner", roles.build_refine, emit,
                 render=lambda p: f"【{p.get('title', '优化方案')}】\n{p.get('text', '')}",
@@ -778,7 +834,7 @@ class TRIZPipeline:
                         "ideality": round(new_eval["ideality"], 3),
                         "best_ideality": round(prev_best["ideality"], 3),
                         "improved": improved,
-                        "suggestions": suggestions,
+                        "reviews": round_reviews,
                         "series": series})
             if auto_rest:
                 tail = "已采纳。" if improved else "保留原方案。"
@@ -787,7 +843,8 @@ class TRIZPipeline:
             opt_msg = (f"第{i + 1}轮优化后理想性 {new_eval['ideality']:.2f}，"
                        + ("高于当前最优，" if improved else "未超过当前最优，") + tail)
             await emit({"type": "message", "agent": "panel",
-                        "agent_title": "专家评审组", "content": opt_msg})
+                        "agent_title": "专家评审组", "content": opt_msg,
+                        "reviews": new_eval["reviews"]})
 
             # 检查点：每轮优化后（供分叉恢复，自动/手动均持久化）
             await emit({"type": "checkpoint", "stage": "iterate",
@@ -877,7 +934,10 @@ class TRIZPipeline:
                 raise ValueError("手动修改的方案内容不能为空。")
             await emit({"type": "system",
                         "content": "用户手动修改了本轮方案，评审组正在重新评分…"})
-            new_eval = await self._score_one(problem, text, emit, refined=True)
+            new_eval = await self._score_one(
+                problem, text, emit, refined=True,
+                announce={"kind": "rescore_edit",
+                          "title": title or round_best.get("title", "手动修改方案")})
             best = {"index": prev_best.get("index"),
                     "title": title or round_best.get("title", "手动修改方案"),
                     "text": text, **new_eval}

@@ -106,6 +106,12 @@ async def triz_knowledge():
     }
 
 
+@app.get("/api/triz/matrix")
+async def triz_matrix():
+    # 经典 Altshuller 39x39 矛盾矩阵的非空单元（行=改善参数，列=恶化参数）
+    return {"cells": K.matrix_cells()}
+
+
 @app.get("/api/runs")
 async def runs_list():
     return store.list_runs()

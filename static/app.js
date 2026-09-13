@@ -30,8 +30,92 @@ const SvgLine = {
   },
 };
 
+/* 三位评审专家（收益/成本/副作用）的展示元信息（人物 icon 与对话头像一致） */
+const REVIEW_DIMS = {
+  benefit: { label: "收益评审专家", icon: "🧑‍💼" },
+  cost: { label: "成本评审专家", icon: "👷" },
+  harm: { label: "副作用评审专家", icon: "🧑‍🚒" },
+};
+
+/* 专家评审意见折叠区：聚合气泡 / 右侧文档卡片共用，默认收起 */
+const ReviewList = {
+  props: {
+    reviews: { type: Array, default: () => [] },
+    open: { type: Boolean, default: false },
+    closedText: { type: String, default: "查看专家意见" },
+    openText: { type: String, default: "收起" },
+  },
+  emits: ["toggle"],
+  template: `
+    <div class="rv-wrap">
+      <button type="button" class="rv-toggle" @click="$emit('toggle')">
+        <span class="rv-caret" aria-hidden="true">{{ open ? '▾' : '▸' }}</span>
+        <span>{{ open ? openText : closedText }}</span>
+      </button>
+      <div v-show="open" class="rv-list">
+        <div v-for="rv in reviews" :key="rv.dim" class="rv-item" :class="'rv-' + rv.dim">
+          <div class="rv-head">
+            <span class="rv-ico" aria-hidden="true">{{ rv.icon }}</span>
+            <b>{{ rv.label }}</b>
+            <span class="rv-score">{{ rv.score }}<small>/10</small></span>
+          </div>
+          <div v-if="rv.reason" class="rv-row">
+            <span class="rv-k">依据</span><span>{{ rv.reason }}</span>
+          </div>
+          <div v-if="rv.suggestion" class="rv-row">
+            <span class="rv-k">建议</span><span>{{ rv.suggestion }}</span>
+          </div>
+        </div>
+      </div>
+    </div>`,
+};
+
+/* 40 个发明原则的概念示意图（内联 SVG 图元，currentColor 描边，由 .kn-icon 统一着色） */
+const PRINCIPLE_ICONS = {
+  1: `<rect x="7" y="12" width="9" height="24" rx="1.5"/><rect x="19.5" y="12" width="9" height="24" rx="1.5"/><rect x="32" y="12" width="9" height="24" rx="1.5"/>`,
+  2: `<rect x="7" y="14" width="20" height="20" rx="2" stroke-dasharray="3 3"/><path d="M26 24H13m4-4-4 4 4 4"/><circle cx="35" cy="24" r="6"/>`,
+  3: `<rect x="8" y="8" width="14" height="14" rx="2"/><rect x="26" y="8" width="14" height="14" rx="2" fill="currentColor" stroke="none"/><rect x="8" y="26" width="14" height="14" rx="2"/><rect x="26" y="26" width="14" height="14" rx="2"/>`,
+  4: `<rect x="13.5" y="6" width="5" height="24" rx="2.5"/><rect x="29" y="10" width="5" height="20" rx="2.5"/><path d="M8 36h32"/>`,
+  5: `<path d="M7 13h14l9 11M7 24h24M7 35h14l9-11"/><path d="M30 24h11m-5-5 5 5-5 5"/>`,
+  6: `<circle cx="24" cy="24" r="7"/><path d="M24 17V8M24 40v-9M17 24H8M40 24h-9"/><circle cx="24" cy="7" r="2"/><circle cx="24" cy="41" r="2"/><circle cx="7" cy="24" r="2"/><circle cx="41" cy="24" r="2"/>`,
+  7: `<rect x="8" y="8" width="32" height="32" rx="2"/><rect x="15" y="15" width="18" height="18" rx="1.5"/><rect x="20.5" y="20.5" width="7" height="7" rx="1" fill="currentColor" stroke="none"/>`,
+  8: `<ellipse cx="24" cy="13" rx="7.5" ry="8.5"/><path d="M24 8V3m-3 2 3-2 3 2M24 21.5v6"/><rect x="17" y="28" width="14" height="12" rx="2"/>`,
+  9: `<path d="M24 6l14 5v11c0 9-6 15-14 19-8-4-14-10-14-19V11z"/><path d="M30 24H16m6-6-6 6 6 6"/>`,
+  10: `<circle cx="24" cy="25" r="16"/><path d="M24 15v10l7 5"/><circle cx="24" cy="25" r="1.8" fill="currentColor" stroke="none"/><path d="M18 7l-4 3 2 4"/>`,
+  11: `<path d="M10 22c2-6 8-9 14-9s12 3 14 9c-4 2-10 2-14 2s-10 0-14-2z"/><path d="M14 22l10 14 10-14M24 36v3"/><rect x="20" y="38" width="8" height="4" rx="1"/>`,
+  12: `<path d="M12 16v20h24V16"/><path d="M12 24h24" stroke-dasharray="4 3"/><path d="M8 24h4M36 24h4"/>`,
+  13: `<path d="M14 18a12 12 0 0 1 18-4"/><path d="M32 8v7h-7"/><path d="M34 30a12 12 0 0 1-18 4"/><path d="M16 40v-7h7"/>`,
+  14: `<path d="M8 38c8-16 24-16 32 0"/><circle cx="14" cy="32" r="4"/><circle cx="24" cy="22" r="4"/><circle cx="34" cy="32" r="4"/>`,
+  15: `<rect x="7" y="30" width="10" height="8" rx="2"/><rect x="31" y="12" width="10" height="8" rx="2"/><path d="M17 34l19-18"/><circle cx="17" cy="34" r="2.5" fill="currentColor" stroke="none"/><circle cx="36" cy="16" r="2.5" fill="currentColor" stroke="none"/>`,
+  16: `<path d="M14 10h20l-2 32H16z"/><path d="M16 24h16" stroke-dasharray="3 3"/><path d="M17 18c3-2.5 6 2.5 9 0s5-2.5 7 0"/><path d="M24 18v-6m-3 3 3-3 3 3"/>`,
+  17: `<path d="M24 8l14 7v18L24 40 10 33V15z"/><path d="M10 15l14 7 14-7M24 22v18"/>`,
+  18: `<rect x="19" y="18" width="10" height="14" rx="2"/><path d="M14 21c-3 3-3 9 0 12M34 21c3 3 3 9 0 12M10 17c-4 5-4 11 0 16M38 17c4 5 4 11 0 16" stroke-width="1.8"/>`,
+  19: `<path d="M6 30v-8M12 30V14M18 30v-8M24 30V14M30 30v-8M36 30V14M42 30v-8"/>`,
+  20: `<path d="M30 12a14 14 0 1 0 8 10"/><path d="M38 8v8h-8"/>`,
+  21: `<path d="M27 6L12 27h9l-3 15 18-23h-9z"/>`,
+  22: `<path d="M14 8v20M8 22l6 7 6-7"/><path d="M28 40c10-2 12-14 6-22"/><path d="M34 18v-8h-8"/>`,
+  23: `<path d="M34 14a14 14 0 1 0 4 12"/><path d="M38 20v-8h-8"/><circle cx="24" cy="24" r="4"/>`,
+  24: `<rect x="7" y="16" width="10" height="16" rx="2"/><rect x="31" y="16" width="10" height="16" rx="2"/><rect x="20" y="12" width="8" height="24" rx="2" stroke-dasharray="3 3"/><path d="M17 24h3M28 24h3"/>`,
+  25: `<rect x="16" y="16" width="16" height="16" rx="3"/><path d="M32 14a13 13 0 1 0 6 10"/><path d="M38 18v-7h-7"/>`,
+  26: `<rect x="7" y="14" width="15" height="20" rx="2"/><path d="M24 24h3m-2-3 2 3-2 3"/><rect x="29" y="14" width="13" height="20" rx="2" stroke-dasharray="3 3" opacity="0.7"/>`,
+  27: `<path d="M15 12h18l-1.8 24c-.1 1.8-1.2 3-3 3H19.8c-1.8 0-2.9-1.2-3-3z"/><path d="M10 8l28 32"/>`,
+  28: `<rect x="10" y="20" width="7" height="8" rx="1.5"/><path d="M22 21c-2 2-2 4 0 6M26 16c-4 3-4 13 0 16M30 11c-6 4-6 22 0 26"/>`,
+  29: `<path d="M10 28c0-10 6-18 14-18s14 8 14 18c0 4-3 6-6 6H16c-3 0-6-2-6-6z"/><path d="M15 31c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><circle cx="20" cy="20" r="1.6" fill="currentColor" stroke="none"/><circle cx="28" cy="17" r="1.6" fill="currentColor" stroke="none"/><circle cx="24" cy="23" r="1.6" fill="currentColor" stroke="none"/>`,
+  30: `<path d="M7 22c6-8 12 8 18 0s10-6 16-2"/><path d="M10 30h28v10H10z" stroke-dasharray="3 3" opacity="0.7"/>`,
+  31: `<rect x="9" y="9" width="30" height="30" rx="3"/><circle cx="18" cy="18" r="2.2"/><circle cx="30" cy="18" r="2.2"/><circle cx="24" cy="24" r="2.2"/><circle cx="18" cy="30" r="2.2"/><circle cx="30" cy="30" r="2.2"/>`,
+  32: `<path d="M24 8a16 16 0 0 1 0 32z" fill="currentColor" stroke="none"/><circle cx="24" cy="24" r="16"/>`,
+  33: `<rect x="8" y="14" width="14" height="20" rx="2"/><rect x="26" y="14" width="14" height="20" rx="2"/><path d="M12 20h6M30 20h6M12 28h6M30 28h6" stroke-width="1.5"/>`,
+  34: `<rect x="10" y="14" width="18" height="20" rx="2"/><path d="M30 18l6-4M31 24h7M30 30l6 4" stroke-dasharray="2 3"/><circle cx="40" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="39" cy="36" r="1.4" fill="currentColor" stroke="none"/>`,
+  35: `<rect x="8" y="30" width="8" height="8" rx="1"/><path d="M22 35c2-3 4 3 6 0s4-3 5 0"/><circle cx="36" cy="18" r="2"/><circle cx="31" cy="24" r="1.6"/><circle cx="40" cy="26" r="1.6"/>`,
+  36: `<path d="M20 8a4 4 0 0 1 8 0v17a8 8 0 1 1-8 0z"/><circle cx="24" cy="33" r="3" fill="currentColor" stroke="none"/><path d="M24 16v14"/><path d="M34 14c3 3 3 7 0 10-3-3-3-7 0-10z"/>`,
+  37: `<path d="M8 30h32"/><path d="M8 38c8-10 24-10 32 0"/><path d="M24 8v8m-3-5 3-3 3 3"/>`,
+  38: `<path d="M24 8c5 6 9 10 9 17a9 9 0 0 1-18 0c0-4 2-6 3.5-8C20 20 22 18 24 8z"/><circle cx="20" cy="26" r="1.5" fill="currentColor" stroke="none"/><circle cx="28" cy="28" r="1.5" fill="currentColor" stroke="none"/>`,
+  39: `<path d="M12 40V22a12 12 0 0 1 24 0v18"/><path d="M12 40h24" stroke-dasharray="4 3"/><rect x="20" y="28" width="8" height="12" rx="1.5"/>`,
+  40: `<rect x="8" y="10" width="32" height="7" rx="1.5"/><rect x="8" y="20.5" width="32" height="7" rx="1.5" opacity="0.55"/><rect x="8" y="31" width="32" height="7" rx="1.5" stroke-dasharray="3 3"/>`,
+};
+
 createApp({
-  components: { SvgLine },
+  components: { SvgLine, ReviewList },
   data() {
     return {
       view: "home",
@@ -68,7 +152,7 @@ createApp({
           title: "矛盾参数 · 匹配 39 个工程参数，识别技术矛盾对",
           anchors: ["agent:matcher", "phase0"] },
         { key: "pair", short: "矛盾选择", kind: "dot",
-          title: "矛盾选择 · 人工选定主要矛盾对（可编辑参数 / 分叉探索）",
+          title: "矛盾选择 · 人工选定主要矛盾对（可编辑参数 / 分支探索）",
           anchors: ["pause:pair"] },
         { key: "principle", short: "原则选择", kind: "dot",
           title: "原则选择 · 矛盾矩阵查表 / 方法学家推断发明原则（40 原则）",
@@ -87,21 +171,21 @@ createApp({
           anchors: ["final-sys", "pause:iterate", "pause:candidate"] },
       ],
       roster: [
-        { key: "analyst", icon: "🔍", title: "问题参数提取师",
+        { key: "analyst", title: "问题参数提取师",
           duty: "从问题描述中抽取希望改善与可能恶化的工程参数", action: "正在阅读问题，抽取关键工程参数" },
-        { key: "matcher", icon: "🧭", title: "TRIZ参数匹配专家",
+        { key: "matcher", title: "TRIZ参数匹配专家",
           duty: "将具体参数匹配到39个工程参数，识别技术矛盾对", action: "正在匹配工程参数，识别技术矛盾" },
-        { key: "methodologist", icon: "📚", title: "TRIZ方法学家",
+        { key: "methodologist", title: "TRIZ方法学家",
           duty: "矛盾矩阵无推荐时，从40个发明原则中推断适用原则", action: "正在推断适用的发明原则" },
-        { key: "engineer", icon: "💡", title: "创意设计师",
+        { key: "engineer", title: "创意设计师",
           duty: "依据发明原则发散生成具体、可落地的候选方案", action: "正在运用发明原则构思候选方案" },
-        { key: "expert_benefit", icon: "📈", title: "收益评审专家",
+        { key: "expert_benefit", title: "收益评审专家",
           duty: "评估方案的有用功能与收益大小", action: "正在评估方案收益" },
-        { key: "expert_cost", icon: "⚖️", title: "成本评审专家",
+        { key: "expert_cost", title: "成本评审专家",
           duty: "评估结构、材料、制造、能耗等成本代价", action: "正在评估方案成本" },
-        { key: "expert_harm", icon: "🛡️", title: "副作用评审专家",
+        { key: "expert_harm", title: "副作用评审专家",
           duty: "评估方案可能引入的有害副作用", action: "正在评估有害副作用" },
-        { key: "refiner", icon: "🔧", title: "优化设计师",
+        { key: "refiner", title: "优化设计师",
           duty: "依据评审建议对方案做微调优化", action: "正在依据评审建议微调优化方案" },
       ],
       phase: -1,
@@ -119,6 +203,7 @@ createApp({
       scores: [],
       bestIndex: -1,
       optimizations: [],
+      docReviewOpen: {},  // 右侧文档评审意见展开态：{ 'c<index>': bool, 'o<iteration>': bool }
       final: null,
       error: "",
       paused: false,
@@ -134,6 +219,15 @@ createApp({
       tip: { show: false, x: 0, y: 0, title: "", detail: "", examples: [] },
       // 多分支进度轨道：分支行悬停气泡（展示分支名/状态/进度/轮次/分叉点）
       bpTip: { show: false, x: 0, y: 0, title: "", lines: [] },
+      // 独立于 AI 工作流的 TRIZ 知识库（仿 triz40：简介 / 参数 / 原则 / 矩阵）
+      wikiTab: "intro",
+      wikiBack: "home",
+      wikiKw: "",          // 40 原则关键词检索
+      paramKw: "",         // 39 工程参数关键词检索
+      wikiFlash: 0,        // 矩阵跳转原则卡片时的高亮编号
+      matrixCells: {},     // {"改善,恶化": [原则编号...]}
+      mxImp: 1,            // 矩阵查询：希望改善的参数
+      mxWor: 2,            // 矩阵查询：随之恶化的参数
     };
   },
   computed: {
@@ -145,6 +239,42 @@ createApp({
       return Object.values(this.kn.parameter || {})
         .map(p => ({ id: p.id, name: p.name }))
         .sort((a, b) => a.id - b.id);
+    },
+    // 知识库：39 工程参数（按编号）
+    wikiParams() {
+      return Object.values(this.kn.parameter || {}).sort((a, b) => a.id - b.id);
+    },
+    // 参数检索：匹配编号/名称/释义/详解/典型例子
+    filteredParams() {
+      const kw = this.paramKw.trim().toLowerCase();
+      const all = this.wikiParams;
+      if (!kw) return all;
+      return all.filter(p =>
+        String(p.id) === kw ||
+        [p.name, p.desc, p.detail, ...(p.examples || [])]
+          .join("\n").toLowerCase().includes(kw));
+    },
+    // 知识库：40 发明原则（按编号）
+    wikiPrinciples() {
+      return Object.values(this.kn.principle || {}).sort((a, b) => a.id - b.id);
+    },
+    // 原则检索：匹配编号/名称/释义/详解/子方法/案例
+    filteredPrinciples() {
+      const kw = this.wikiKw.trim().toLowerCase();
+      const all = this.wikiPrinciples;
+      if (!kw) return all;
+      return all.filter(p => {
+        if (String(p.id) === kw) return true;
+        const hay = [p.name, p.desc, p.detail, ...(p.examples || [])];
+        (p.methods || []).forEach(m => { hay.push(m.t, ...(m.e || [])); });
+        return hay.join("\n").toLowerCase().includes(kw);
+      });
+    },
+    // 矩阵查询结果：当前改善/恶化参数对应的推荐原则卡片
+    matrixResult() {
+      if (this.mxImp === this.mxWor) return [];
+      const ids = this.matrixCells[`${this.mxImp},${this.mxWor}`] || [];
+      return ids.map(id => ({ id, ...(this.kn.principle[id] || {}) }));
     },
     // 当前查看的分支节点（折叠态标题栏展示其名称与状态）
     currentBranch() {
@@ -201,6 +331,11 @@ createApp({
       this.openRun(runId, "latest");
     }
     if (qs.get("view") === "workspace") this.view = "workspace";
+    // 深链：?view=wiki&tab=intro|params|principles|matrix 直接打开知识库页签（链接分享）
+    if (qs.get("view") === "wiki") {
+      this.wikiTab = qs.get("tab") || "intro";
+      this.view = "wiki";
+    }
     if (qs.get("autorun") === "1") {
       this.autoMode = true;
       this.$nextTick(() => {
@@ -221,6 +356,62 @@ createApp({
         this.kn = kn;
         this.knLoaded = true;
       }).catch(() => {});
+      fetch("/api/triz/matrix").then(r => r.json()).then(d => {
+        this.matrixCells = d.cells || {};
+      }).catch(() => {});
+    },
+    // 打开独立知识库页签（intro/params/principles/matrix），记录来源视图供返回
+    openWiki(tab) {
+      this.wikiBack = (this.view === "workspace") ? "workspace" : "home";
+      this.wikiTab = tab || "intro";
+      this.view = "wiki";
+      window.scrollTo(0, 0);
+    },
+    backFromWiki() {
+      this.view = (this.wikiBack === "workspace" && this.currentRunId) ? "workspace" : "home";
+    },
+    // 矛盾矩阵网格：单元格内的推荐原则编号（空数组=经典矩阵空单元）
+    mxCell(i, j) {
+      return this.matrixCells[`${i},${j}`] || [];
+    },
+    // 矩阵示意网格中点击单元：选定该改善/恶化参数
+    pickMatrixCell(i, j) {
+      if (i === j) return;
+      this.mxImp = i;
+      this.mxWor = j;
+    },
+    swapMatrixAxis() {
+      const t = this.mxImp; this.mxImp = this.mxWor; this.mxWor = t;
+    },
+    // 40 原则的概念示意图（内联 SVG，描边色由 CSS currentColor 控制）
+    principleSvg(id) {
+      const body = PRINCIPLE_ICONS[id] || PRINCIPLE_ICONS[1];
+      return `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6"` +
+             ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+    },
+    // triz40 配图加载失败（离线/被删）时移除 <img>，露出同位置的自绘 SVG 兜底
+    onPrincipleImgError(e) {
+      const img = e.target;
+      const fb = img.nextElementSibling;
+      img.remove();
+      if (fb) fb.hidden = false;
+    },
+    // 从矩阵推荐原则跳转到「40 原则」页签并定位、闪烁高亮
+    jumpPrinciple(id) {
+      this.wikiKw = "";
+      this.wikiTab = "principles";
+      this.wikiFlash = id;
+      const doScroll = () => {
+        const el = document.getElementById("kn-p-" + id);
+        if (el) el.scrollIntoView({ block: "center" });
+      };
+      this.$nextTick(() => {
+        // rAF 等页签切换后的首帧布局完成再定位；用瞬时滚动（部分浏览器/系统设置下 smooth 滚动会被直接丢弃）
+        requestAnimationFrame(doScroll);
+        // 高卡片首帧布局较重，再补一次瞬时定位兜底（已到位时为 no-op）
+        setTimeout(doScroll, 120);
+        setTimeout(() => { if (this.wikiFlash === id) this.wikiFlash = 0; }, 2000);
+      });
     },
     // 全局事件委托：悬停任意 [data-k] 热区时显示知识气泡（参数/原则的阐述与例子）
     bindKnowledgeTip() {
@@ -293,17 +484,45 @@ createApp({
       return {
         analyst: "🕵️", matcher: "🧑‍🔬", engineer: "🧑‍🎨",
         expert_benefit: "🧑‍💼", expert_cost: "👷", expert_harm: "🧑‍🚒",
-        refiner: "🧑‍🔧", methodologist: "🧑‍🏫", panel: "👥",
+        refiner: "🧑‍🔧", methodologist: "🧑‍🏫", panel: "🧑‍⚖️",
       }[agent] || "👤";
     },
     rosterItem(key) {
       return this.roster.find(r => r.key === key)
-        || { key, icon: "🤖", title: key, duty: "" };
+        || { key, title: key, duty: "" };
     },
     renderText(text) {
       const div = document.createElement("div");
       div.textContent = text || "";
       return div.innerHTML.replace(/\n/g, "<br>");
+    },
+    // 评审明细归一化：新结构 reviews(list) 优先；旧事件只有 comments 映射时降级展示为「依据」
+    normReviews(reviews, comments, scores) {
+      if (Array.isArray(reviews) && reviews.length) {
+        return reviews.map(r => {
+          const meta = REVIEW_DIMS[r.dim] || { label: r.dim, icon: "👤" };
+          return {
+            dim: r.dim, label: r.label || meta.label, icon: meta.icon,
+            score: r.score == null ? null : Number(r.score),
+            reason: r.reason || "", suggestion: r.suggestion || "",
+          };
+        });
+      }
+      const out = [];
+      ["benefit", "cost", "harm"].forEach(dim => {
+        const reason = comments && comments[dim];
+        if (reason) {
+          out.push({
+            dim, label: REVIEW_DIMS[dim].label, icon: REVIEW_DIMS[dim].icon,
+            score: scores && scores[dim] != null ? Number(scores[dim]) : null,
+            reason, suggestion: "",
+          });
+        }
+      });
+      return out;
+    },
+    toggleDocReview(key) {
+      this.docReviewOpen = { ...this.docReviewOpen, [key]: !this.docReviewOpen[key] };
     },
     restart() {
       if (this.ws) this.ws.close();
@@ -314,7 +533,8 @@ createApp({
       this.phase = -1; this.messages = []; this.params = null; this.pairs = [];
       this.selectedPair = null; this.principles = []; this.candidates = [];
       this.hullSeries = []; this.hullRatio = 1; this.scores = [];
-      this.bestIndex = -1; this.optimizations = []; this.final = null;
+      this.bestIndex = -1; this.optimizations = []; this.docReviewOpen = {};
+      this.final = null;
       this.error = ""; this.paused = false;
       this.running = false; this.activeAgent = null;
       this.streaming = null; this.pendingLocate = null;
@@ -865,6 +1085,9 @@ createApp({
           this.messages.push({
             type: "msg", agent: ev.agent, agent_title: ev.agent_title,
             content: ev.content, refs: ev.refs || [],
+            // 评审组聚合气泡可展开查看三位专家的评分依据与针对性建议
+            reviews: this.normReviews(ev.reviews),
+            reviewOpen: false,
             // 思考内容随气泡落盘（会话内可展开回看；刷新回放仅保留字数摘要）
             thinking: st && st.thinkContent ? st.thinkContent : null,
             thinkingChars: (st && st.thinkContent.length) || ev.thinking_chars || 0,
@@ -1036,6 +1259,9 @@ createApp({
           const item = {
             index: ev.index, title: ev.title, benefit: ev.benefit,
             cost: ev.cost, harm: ev.harm, ideality: ev.ideality,
+            reviewsList: this.normReviews(
+              ev.reviews, ev.comments,
+              { benefit: ev.benefit, cost: ev.cost, harm: ev.harm }),
           };
           const idx = this.scores.findIndex(s => s.index === item.index);
           if (idx >= 0) this.scores[idx] = item; else this.scores.push(item);
@@ -1048,6 +1274,7 @@ createApp({
           this.optimizations.unshift({
             iteration: ev.iteration, text: ev.text, title: ev.title,
             ideality: ev.ideality, improved: ev.improved,
+            reviewsList: this.normReviews(ev.reviews),
             series: ev.series || [],
           });
           break;

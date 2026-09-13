@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TRIZ-GPT · 人机交互创意生成系统</title>
-<link rel="stylesheet" href="/static/styles.css?v=202609103">
+<link rel="stylesheet" href="/static/styles.css?v=202609116">
 </head>
 <body>
 <div id="app">
@@ -62,6 +62,244 @@
           {{ ex.name }}
         </button>
       </div>
+
+      <button type="button" class="wiki-entry" @click="openWiki('intro')">
+        <span aria-hidden="true">📚</span>
+        第一次接触 TRIZ？先逛逛知识库：39 个工程参数 · 40 个发明原则 · 矛盾矩阵
+        <span class="wiki-entry-go" aria-hidden="true">→</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- 独立于 AI 工作流的 TRIZ 知识库（仿 triz40：简介 / 参数 / 原则检索 / 矛盾矩阵） -->
+  <section v-else-if="view==='wiki'" class="wiki">
+    <div class="wiki-shell paper-sheet">
+      <header class="wiki-head">
+        <div class="wiki-head-text">
+          <h1>📚 TRIZ 知识库</h1>
+          <p>脱离生成流程，随时查阅经典 TRIZ 方法论：参数、原则与矛盾矩阵</p>
+        </div>
+      </header>
+
+      <nav class="wiki-tabs">
+        <button type="button" v-for="t in [
+            {k:'intro', n:'📖 TRIZ 简介'},
+            {k:'params', n:'📐 39 工程参数'},
+            {k:'principles', n:'💡 40 发明原则'},
+            {k:'matrix', n:'⊞ 矛盾矩阵'}]"
+                :key="t.k" class="wiki-tab" :class="{on: wikiTab===t.k}"
+                @click="wikiTab=t.k">{{ t.n }}</button>
+      </nav>
+
+      <!-- ① TRIZ 基本介绍 -->
+      <div v-if="wikiTab==='intro'" class="wiki-pane">
+        <div class="intro-block">
+          <h2>TRIZ 是什么</h2>
+          <p><b>TRIZ</b>（俄语 «Теория решения изобретательских задач» 的拉丁缩写，意为「发明问题解决理论」）
+            由苏联发明家、专利审查员<b>根里奇·阿奇舒勒（Genrich Altshuller）</b>于 1946 年起创立。
+            他和团队分析了<b>数十万件高水平发明专利</b>，发现技术发明并非偶然的灵感，
+            而是遵循反复出现的规律——工程系统总是在「解决一个矛盾」中进化。
+            TRIZ 就是把这些规律提炼成的一套可操作的创新方法论。</p>
+        </div>
+
+        <div class="intro-block">
+          <h2>核心思想：创新有规律可循</h2>
+          <ul class="intro-list">
+            <li><b>技术系统进化法则</b>：系统总是朝着提高「理想性」的方向发展——功能越来越强，代价与副作用越来越小。</li>
+            <li><b>矛盾是发明的起点</b>：当改善系统的一个属性会导致另一个属性恶化时，就构成了<b>技术矛盾</b>；真正的发明不是折中妥协，而是彻底消除矛盾。</li>
+            <li><b>解法可以跨领域复用</b>：不同行业的发明背后反复出现同一批解题策略，这些策略被归纳为 40 个「发明原则」。</li>
+            <li><b>从具体到抽象、再回到具体</b>：把具体问题抽象成标准参数矛盾，用标准工具找到抽象解法，再类比迁移成你的具体方案。</li>
+          </ul>
+        </div>
+
+        <div class="intro-block">
+          <h2>TRIZ 的几件「标准工具」</h2>
+          <div class="intro-tools">
+            <button type="button" class="intro-tool paper-sheet" @click="wikiTab='params'">
+              <span class="it-ico">📐</span>
+              <b>39 个通用工程参数</b>
+              <small>描述矛盾的标准语言。重量、速度、力、可靠性、能耗……任何工程冲突都能翻译成两个参数间的冲突。</small>
+            </button>
+            <button type="button" class="intro-tool paper-sheet" @click="wikiTab='matrix'">
+              <span class="it-ico">⊞</span>
+              <b>矛盾矩阵</b>
+              <small>一张 39×39 的查表：行是「希望改善」的参数，列是「随之恶化」的参数，交叉单元给出推荐的发明原则。</small>
+            </button>
+            <button type="button" class="intro-tool paper-sheet" @click="wikiTab='principles'">
+              <span class="it-ico">💡</span>
+              <b>40 个发明原则</b>
+              <small>分割、抽取、局部质量、嵌套、预先反作用……每个原则都配有名品案例，可按关键词检索。</small>
+            </button>
+            <div class="intro-tool paper-sheet intro-tool-static">
+              <span class="it-ico">⚖️</span>
+              <b>理想性公式</b>
+              <small>理想性 = 有用功能 ÷（成本 + 有害副作用）。本系统的评审专家即按收益、成本、副作用三个维度十分制打分。</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="intro-block">
+          <h2>用 TRIZ 解题的标准流程</h2>
+          <ol class="intro-flow">
+            <li><b>具体问题</b>：描述你面临的工程/设计困境（如「起落架既要坚固又要轻」）。</li>
+            <li><b>抽象参数</b>：识别希望改善与随之恶化的工程参数（运动物体重量 ⇄ 应力/压力）。</li>
+            <li><b>查矩阵</b>：在矛盾矩阵中查出推荐的发明原则。</li>
+            <li><b>选原则</b>：理解原则背后的解题思路，矩阵空单元时可通览 40 原则自行推断。</li>
+            <li><b>类比迁移</b>：把抽象原则转译为针对你问题的具体方案。</li>
+            <li><b>评估迭代</b>：按理想性评估方案，持续优化直到满意。</li>
+          </ol>
+          <p class="muted">这正是 TRIZ-GPT 多智能体流水线自动化的链路——回到首页描述问题，即可让 AI 团队陪你走一遍。</p>
+        </div>
+      </div>
+
+      <!-- ② 39 工程参数 -->
+      <div v-else-if="wikiTab==='params'" class="wiki-pane">
+        <p class="wiki-pane-intro muted">TRIZ 用这 39 个通用工程参数描述一切技术矛盾。编号 K1–K39 也是矛盾矩阵的坐标轴。</p>
+        <div class="wiki-search">
+          <input type="text" v-model="paramKw" class="wiki-search-input"
+                 placeholder="🔍 检索参数：输入关键词（如 重量、能量、可靠、精度）或参数编号">
+          <span class="wiki-search-count">{{ filteredParams.length }} / 39</span>
+        </div>
+        <div v-if="!filteredParams.length" class="wiki-empty">
+          没有找到与「{{ paramKw }}」相关的工程参数，换个关键词试试？
+        </div>
+        <div class="kn-grid">
+          <article v-for="p in filteredParams" :key="'wp'+p.id" class="kn-card">
+            <div class="kn-no">K{{ p.id }}</div>
+            <h3>{{ p.name }}</h3>
+            <p class="kn-desc">{{ p.desc }}</p>
+            <p v-if="p.detail" class="kn-detail">{{ p.detail }}</p>
+            <div v-if="p.examples && p.examples.length" class="kn-ex">
+              <b>典型例子</b>
+              <ul><li v-for="(e, ei) in p.examples" :key="ei">{{ e }}</li></ul>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <!-- ③ 40 发明原则 + 检索 -->
+      <div v-else-if="wikiTab==='principles'" class="wiki-pane">
+        <div class="wiki-search">
+          <input type="text" v-model="wikiKw" class="wiki-search-input"
+                 placeholder="🔍 检索原则：输入关键词（如 分割、振动、预先、相变）或原则编号">
+          <span class="wiki-search-count">{{ filteredPrinciples.length }} / 40</span>
+        </div>
+        <p class="wiki-pane-intro muted">40 个发明原则是从海量专利中归纳出的通用解题策略，点击下方矩阵推荐编号也会跳到这里。</p>
+        <p class="kp-credit">🖼 卡片配图依据原站署名条款引用：
+          <a href="https://www.triz40.com/aff_Principes_TRIZ.php" target="_blank" rel="noopener noreferrer">Source : TRIZ40 - www.triz40.com</a>
+          （插图 © Thierry Vilar，摄影图源 Unsplash；仅供学习参考，如有侵权请联系删除）
+        </p>
+        <div v-if="!filteredPrinciples.length" class="wiki-empty">
+          没有找到与「{{ wikiKw }}」相关的原则，换个关键词试试？
+        </div>
+        <div class="kn-grid kp-grid">
+          <article v-for="q in filteredPrinciples" :key="'wq'+q.id"
+                   class="kn-card kn-principle" :id="'kn-p-'+q.id"
+                   :class="{flash: wikiFlash===q.id}">
+            <header class="kp-head">
+              <div class="kp-title">
+                <h3><span class="kn-no gold">{{ q.id }}</span>{{ q.name }}</h3>
+                <p class="kn-desc">{{ q.desc }}</p>
+              </div>
+              <figure class="kp-fig">
+                <img :src="'/static/img/principles/' + q.id + '.jpg'" :alt="q.name + ' 配图'"
+                     loading="lazy" @error="onPrincipleImgError($event, q.id)">
+                <span class="kn-icon kp-fig-fb" v-html="principleSvg(q.id)" hidden></span>
+              </figure>
+            </header>
+            <ol v-if="q.methods && q.methods.length" class="kp-methods">
+              <li v-for="(m, mi) in q.methods" :key="mi" class="kp-method">
+                <p class="kp-mt"><span class="kp-dot">{{ mi + 1 }}</span>{{ m.t }}</p>
+                <ul class="kp-cases">
+                  <li v-for="(c, ci) in m.e" :key="ci">{{ c }}</li>
+                </ul>
+              </li>
+            </ol>
+            <div v-else-if="q.examples && q.examples.length" class="kn-ex">
+              <b>应用举例</b>
+              <ul><li v-for="(e, ei) in q.examples" :key="ei">{{ e }}</li></ul>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <!-- ④ 矛盾矩阵示意 -->
+      <div v-else-if="wikiTab==='matrix'" class="wiki-pane">
+        <p class="wiki-pane-intro muted">
+          经典 Altshuller 矛盾矩阵：<b>行</b>＝希望改善的参数，<b>列</b>＝随之恶化的参数，
+          交叉单元中的数字是推荐的发明原则编号（共 1190 个非空单元）。可直接点选网格中的单元，或用下拉框查询。
+        </p>
+
+        <div class="mx-query paper-sheet">
+          <label class="mx-field">
+            <span>希望改善 ↑</span>
+            <select v-model.number="mxImp">
+              <option v-for="o in paramOptions" :key="'i'+o.id" :value="o.id">K{{ o.id }} · {{ o.name }}</option>
+            </select>
+          </label>
+          <button type="button" class="mx-swap" @click="swapMatrixAxis()" title="交换改善/恶化方向">⇄</button>
+          <label class="mx-field">
+            <span>随之恶化 ↓</span>
+            <select v-model.number="mxWor">
+              <option v-for="o in paramOptions" :key="'w'+o.id" :value="o.id">K{{ o.id }} · {{ o.name }}</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="mx-result">
+          <template v-if="mxImp===mxWor">
+            <p class="mx-hint">改善与恶化不能是同一个参数，请在下方矩阵中另选一格。</p>
+          </template>
+          <template v-else-if="matrixResult.length">
+            <p class="mx-hint">
+              改善 <b>K{{ mxImp }} {{ kn.parameter[mxImp] && kn.parameter[mxImp].name }}</b>
+              导致 <b>K{{ mxWor }} {{ kn.parameter[mxWor] && kn.parameter[mxWor].name }}</b> 恶化时，
+              经典矩阵推荐 {{ matrixResult.length }} 个发明原则（点击查看释义与案例）：
+            </p>
+            <div class="mx-principles">
+              <button type="button" v-for="r in matrixResult" :key="'mr'+r.id"
+                      class="mx-principle" @click="jumpPrinciple(r.id)">
+                <span class="mx-pno">{{ r.id }}</span>
+                <span class="mx-pname">{{ r.name || ('原则 ' + r.id) }}</span>
+              </button>
+            </div>
+          </template>
+          <template v-else>
+            <p class="mx-hint">
+              该矩阵单元在经典矩阵中为空（Altshuller 未给出主导原则）。
+              实践中可通览 <a href="#" @click.prevent="wikiTab='principles'">40 个发明原则</a> 自行推断——
+              本系统的「TRIZ 方法学家」角色做的正是这件事。
+            </p>
+          </template>
+        </div>
+
+        <div class="mx-grid-wrap">
+          <div class="mx-grid">
+            <div class="mx-corner">改<br>善<br>╲<br>恶<br>化</div>
+            <div v-for="j in 39" :key="'mh'+j" class="mx-col-head"
+                 :class="{hot: mxWor===j}" :title="'恶化：K'+j+' '+(kn.parameter[j]||{}).name">{{ j }}</div>
+
+            <template v-for="i in 39" :key="'mr'+i">
+              <div class="mx-row-head" :class="{hot: mxImp===i}"
+                   :title="'改善：K'+i+' '+(kn.parameter[i]||{}).name">{{ i }}</div>
+              <button type="button" v-for="j in 39" :key="'mc'+i+'-'+j"
+                      class="mx-cell"
+                      :class="['n' + Math.min(mxCell(i,j).length,4),
+                               {sel: mxImp===i && mxWor===j, hotrow: mxImp===i, hotcol: mxWor===j, diag: i===j}]"
+                      :title="mxCell(i,j).length ? ('K'+i+' ⇄ K'+j+' → 原则 '+mxCell(i,j).join('、')) : ('K'+i+' ⇄ K'+j+'：空单元')"
+                      @click="pickMatrixCell(i,j)">{{ mxCell(i,j).length }}</button>
+            </template>
+          </div>
+        </div>
+        <div class="mx-legend">
+          <span><i class="lg n1"></i>1 个原则</span>
+          <span><i class="lg n2"></i>2 个</span>
+          <span><i class="lg n3"></i>3 个</span>
+          <span><i class="lg n4"></i>4 个</span>
+          <span><i class="lg n0"></i>空单元</span>
+          <span class="mx-legend-tip">点击任意非对角格可直接查询</span>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -72,7 +310,6 @@
           <span class="brand-mark small" aria-hidden="true">💡</span>
           <b>TRIZ-GPT</b>
         </div>
-        <button class="btn-ghost" @click="restart">＋ 新建</button>
       </header>
 
       <!-- 左上角分支树：展示探索家族关系与任务进度，点击节点定位到对应断点，可折叠 -->
@@ -151,7 +388,7 @@
               <small class="phase-desc">{{ m.desc }}</small>
               <div class="phase-team">
                 <span v-for="key in phases[m.index].team" :key="key" class="team-chip">
-                  <span class="team-ico" aria-hidden="true">{{ rosterItem(key).icon }}</span>{{ rosterItem(key).title }}
+                  <span class="team-ico" aria-hidden="true">{{ avatarOf(key) }}</span>{{ rosterItem(key).title }}
                 </span>
               </div>
             </div>
@@ -170,14 +407,16 @@
                   <p class="muted">TRIZ 参数匹配专家给出了以下技术矛盾，我来选一组作为后续研究对象；也可以编辑参数映射或自定义矛盾对：</p>
                   <template v-for="(p, j) in m.pairs" :key="j">
                     <label class="pair-option" :class="{chosen: m.chosen===j && m.editing!==j}">
-                      <input type="radio" :value="j" v-model="m.chosen" :disabled="m.editing===j">
-                      <span>
+                      <span class="pair-info">
                         <b>矛盾 {{ j+1 }}：</b>
                         改善<span class="kn-hot" data-k="parameter" :data-id="p.improving_param_id">「{{ p.improving_param_name }}」<small class="muted">(K{{ p.improving_param_id }})</small></span>
                         ⇄ 恶化<span class="kn-hot" data-k="parameter" :data-id="p.worsening_param_id">「{{ p.worsening_param_name }}」<small class="muted">(K{{ p.worsening_param_id }})</small></span>
                         <em class="pair-why">{{ p.rationale }}</em>
+                      </span>
+                      <span class="pair-ops">
                         <button type="button" class="btn-mini btn-ghost"
                                 @click.prevent="startPairEdit(m, j)">✏️ 编辑</button>
+                        <input type="radio" :value="j" v-model="m.chosen" :disabled="m.editing===j">
                       </span>
                     </label>
                     <div v-if="m.editing===j" class="pair-editor">
@@ -230,7 +469,7 @@
                     <button class="btn-primary" @click="sendPairChoice(m.chosen)" :disabled="m.editing!==null">确认选择</button>
                     <button class="btn-ghost" @click="startPairCustom(m)" :disabled="m.editing!==null">＋ 自定义矛盾对</button>
                     <button class="btn-ghost" @click="sendPairChoice('auto')">交给系统自动决策</button>
-                    <button class="btn-fork" @click="forkRun('pair')" title="保留当前路径，带着另一种选择开一条新分支">⎇ 分叉探索</button>
+                    <button class="btn-fork" @click="forkRun('pair')" title="保留当前路径，带着另一种选择开一条新分支">⎇ 分支探索</button>
                   </div>
                 </template>
 
@@ -241,15 +480,17 @@
                   <template v-for="c in m.candidates" :key="'cand'+c.index">
                     <label class="pair-option cand-option"
                            :class="{chosen: m.chosen===c.index && m.editing!==c.index}">
-                      <input type="radio" :value="c.index" v-model="m.chosen" :disabled="m.editing===c.index">
-                      <span>
+                      <span class="pair-info">
                         <b>方案 {{ c.index+1 }}：{{ c.title }}</b>
                         <span class="cand-opt-meta">
                           <span class="kn-hot" data-k="principle" :data-id="c.principle_id">原则 {{ c.principle_id }}</span> · 理想性 <em class="opt-ideality-num">{{ c.ideality }}</em>
                           （收益 {{ c.benefit }} / 成本 {{ c.cost }} / 副作用 {{ c.harm }}）
                         </span>
+                      </span>
+                      <span class="pair-ops">
                         <button type="button" class="btn-mini btn-ghost"
                                 @click.prevent="startCandEdit(m, c.index)">✏️ 编辑后优化</button>
+                        <input type="radio" :value="c.index" v-model="m.chosen" :disabled="m.editing===c.index">
                       </span>
                     </label>
                     <div v-if="m.editing===c.index" class="pair-editor">
@@ -268,7 +509,7 @@
                     <button class="btn-primary" @click="sendCandidateChoice('choose')" :disabled="m.editing!==null">以此方案进入优化</button>
                     <button class="btn-ghost" @click="sendCandidateChoice('accept')" :disabled="m.editing!==null">直接采纳为最终方案</button>
                     <button class="btn-ghost" @click="sendCandidateChoice('auto')">交给系统自动</button>
-                    <button class="btn-fork" @click="forkRun('candidate')" title="保留当前路径，带着另一种方案选择开一条新分支">⎇ 分叉探索</button>
+                    <button class="btn-fork" @click="forkRun('candidate')" title="保留当前路径，带着另一种方案选择开一条新分支">⎇ 分支探索</button>
                   </div>
                 </template>
 
@@ -310,7 +551,7 @@
                     <button class="btn-ghost" @click="sendIterChoice('continue')" :disabled="m.editing">继续下一轮</button>
                     <button class="btn-ghost" @click="sendIterChoice('stop')">采纳当前方案，结束</button>
                     <button class="btn-ghost" @click="sendIterChoice('auto')" :disabled="m.editing">剩余轮次自动完成</button>
-                    <button class="btn-fork" @click="forkRun('iterate')" title="保留当前路径，带着不同的轮次决策开一条新分支">⎇ 分叉探索</button>
+                    <button class="btn-fork" @click="forkRun('iterate')" title="保留当前路径，带着不同的轮次决策开一条新分支">⎇ 分支探索</button>
                   </div>
                 </template>
               </template>
@@ -337,6 +578,9 @@
                 </div>
               </div>
               <div class="bubble-text" v-html="renderText(m.content)"></div>
+              <review-list v-if="m.reviews && m.reviews.length" :reviews="m.reviews"
+                           :open="!!m.reviewOpen" variant="bubble"
+                           @toggle="m.reviewOpen = !m.reviewOpen"></review-list>
               <div v-if="m.refs && m.refs.length" class="refs">
                 <span v-for="(r, j) in m.refs" :key="j" class="ref-chip"
                       :data-k="r.type" :data-id="r.ref_id">
@@ -443,7 +687,7 @@
           </div>
           <div class="h-track">
             <article v-for="c in candCards" :key="'c'+c.index"
-                     class="h-card cand-card" :class="{best: c.isBest}">
+                     class="h-card cand-card" :class="{best: c.isBest, 'rv-open': docReviewOpen['c'+c.index]}">
               <div class="h-card-head">
                 <span class="cand-idx">方案 {{ c.index+1 }}</span>
                 <span v-if="c.isBest" class="best-badge"><span aria-hidden="true">🏆</span> 最优</span>
@@ -465,6 +709,11 @@
                 <div class="bars mini">
                   <span class="bar harm" :style="{width: c.score.harm*10+'%'}">副作用 {{ c.score.harm }}</span>
                 </div>
+                <review-list v-if="c.score.reviewsList && c.score.reviewsList.length"
+                             :reviews="c.score.reviewsList"
+                             :open="!!docReviewOpen['c'+c.index]"
+                             variant="doc"
+                             @toggle="toggleDocReview('c'+c.index)"></review-list>
               </div>
             </article>
           </div>
@@ -481,7 +730,8 @@
           </div>
           <div class="h-track">
             <article v-for="opt in optTimeline" :key="'opt'+opt.iteration"
-                     class="h-card opt-card" :class="opt.improved?'adopted':'skipped'">
+                     class="h-card opt-card"
+                     :class="[opt.improved?'adopted':'skipped', {'rv-open': docReviewOpen['o'+opt.iteration]}]">
               <div class="h-card-head">
                 <span class="opt-iter">第 {{ opt.iteration }} 轮</span>
                 <span class="round-tag" :class="opt.improved?'green':'gray'">
@@ -490,6 +740,12 @@
               </div>
               <div class="opt-ideality">理想性 <b>{{ opt.ideality }}</b></div>
               <p class="h-card-text">{{ opt.text }}</p>
+              <review-list v-if="opt.reviewsList && opt.reviewsList.length"
+                           :reviews="opt.reviewsList"
+                           :open="!!docReviewOpen['o'+opt.iteration]"
+                           variant="doc"
+                           closed-text="优化依据"
+                           @toggle="toggleDocReview('o'+opt.iteration)"></review-list>
             </article>
           </div>
         </section>
@@ -512,6 +768,16 @@
     </aside>
   </section>
 
+  <!-- 全局浮动工具栏：知识库 / 新建 / 返回，纯 icon，随视图变化 -->
+  <nav class="app-rail" :class="'rail-'+view" aria-label="快捷工具栏">
+    <button v-if="view!=='wiki'" type="button" class="rail-btn" @click="openWiki('intro')"
+            title="TRIZ 知识库：39 参数 · 40 原则 · 矛盾矩阵" aria-label="TRIZ 知识库">📚</button>
+    <button v-if="view==='workspace'" type="button" class="rail-btn" @click="restart"
+            title="新建会话" aria-label="新建会话">＋</button>
+    <button v-if="view==='wiki'" type="button" class="rail-btn" @click="backFromWiki()"
+            title="返回" aria-label="返回">←</button>
+  </nav>
+
   <div id="kn-tip" v-show="tip.show" class="kn-tip" :style="{left: tip.x+'px', top: tip.y+'px'}">
     <div class="kn-tip-title">{{ tip.title }}</div>
     <div class="kn-tip-detail">{{ tip.detail }}</div>
@@ -529,6 +795,6 @@
 </div>
 
 <script src="/static/vendor/vue.global.prod.js"></script>
-<script src="/static/app.js?v=202609103"></script>
+<script src="/static/app.js?v=202609116"></script>
 </body>
 </html>
